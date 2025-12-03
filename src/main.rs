@@ -36,6 +36,7 @@ struct StorageSlot {
     address: [u8; 20],
     storage_key: [u8; 32],
     depth: usize,
+    time_taken: f64,  // Time taken to mine this level in seconds
 }
 
 fn main() {
@@ -146,13 +147,15 @@ fn mine_deep_branch(target_depth: usize, num_threads: usize, use_cuda: bool) -> 
 
         let storage_key = calculate_storage_slot(&address, ERC20_BALANCES_SLOT);
 
+        let level_time = level_start.elapsed();
+
         branch.push(StorageSlot {
             address,
             storage_key,
             depth: current_depth,
+            time_taken: level_time.as_secs_f64(),
         });
 
-        let level_time = level_start.elapsed();
         info!("Level {} found in {:.2} seconds - Address: 0x{}, Storage: 0x{}...",
               current_depth + 1,
               level_time.as_secs_f64(),
@@ -338,6 +341,12 @@ fn print_results(branch: &[StorageSlot], elapsed_seconds: f64) {
 
     info!("═══ Statistics ═══");
     info!("Total addresses mined: {}", branch.len());
+    info!("");
+    info!("Time per depth level:");
+    for (i, slot) in branch.iter().enumerate() {
+        info!("  Level {} (depth {}): {:.2} seconds", i + 1, slot.depth, slot.time_taken);
+    }
+    info!("");
     info!("Average time per level: {:.2} seconds", elapsed_seconds / branch.len() as f64);
 
     // Estimate the number of hashes computed
