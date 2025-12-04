@@ -1,1 +1,5 @@
 /target
+/contracts/
+/.claude/
+/.cache/
+Cargo.lock

@@ -5,10 +5,20 @@ use hex;
 use rand::Rng;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use log::{info, debug};
+use log::{info, debug, error};
+use askama::Template;
+use std::fs;
+use std::process::Command;
 
 #[cfg(feature = "cuda")]
 mod cuda_miner;
+
+/// Template for generating Solidity contract
+#[derive(Template)]
+#[template(path = "WorstCaseERC20.sol.j2")]
+struct ContractTemplate {
+    storage_slots: Vec<String>,
+}
 
 /// Standard ERC20 balance mapping storage slot
 /// In OpenZeppelin's ERC20 implementation, _balances is the first state variable (slot 0)
@@ -77,8 +87,8 @@ fn main() {
     // Output results
     print_results(&branch, elapsed.as_secs_f64());
 
-    // Generate and output initcode
-    let _initcode = generate_initcode(&branch);
+    // Generate contract with mined storage keys and compile it
+    generate_contract(&branch);
 }
 
 /// Calculate the storage slot for a given address in the balances mapping
@@ -347,13 +357,6 @@ fn print_results(branch: &[StorageSlot], elapsed_seconds: f64) {
         info!("  Level {} (depth {}): {:.2} seconds", i + 1, slot.depth, slot.time_taken);
     }
     info!("");
-    info!("Average time per level: {:.2} seconds", elapsed_seconds / branch.len() as f64);
-
-    // Estimate the number of hashes computed
-    let total_attempts_estimate: u64 = branch.iter().enumerate()
-        .map(|(i, _)| if i == 0 { 1 } else { 16_u64.pow(i as u32) })
-        .sum();
-    info!("Estimated total hash computations: ~{}", format_number(total_attempts_estimate));
 }
 
 /// Get the common prefix shared by all addresses in the branch
@@ -380,145 +383,44 @@ fn count_shared_nibbles(a: &[u8; 32], b: &[u8; 32]) -> usize {
         .count()
 }
 
-/// Format large numbers with commas for readability
-fn format_number(n: u64) -> String {
-    let s = n.to_string();
-    let mut result = String::new();
-    for (i, c) in s.chars().rev().enumerate() {
-        if i > 0 && i % 3 == 0 {
-            result.push(',');
-        }
-        result.push(c);
-    }
-    result.chars().rev().collect()
-}
 
-/// Generate EVM initcode that deploys a contract with all mined addresses pre-loaded
-fn generate_initcode(branch: &[StorageSlot]) -> Vec<u8> {
+
+/// Generate and compile the Solidity contract with hardcoded storage keys
+fn generate_contract(branch: &[StorageSlot]) {
     info!("");
     info!("╔════════════════════════════════════════════════════════════════════════╗");
-    info!("║                         EVM INITCODE GENERATION                        ║");
+    info!("║                     CONTRACT GENERATION & COMPILATION                  ║");
     info!("╚════════════════════════════════════════════════════════════════════════╝");
     info!("");
 
-    let mut bytecode = Vec::new();
+    // Step 1: Generate the contract using Askama template
+    let storage_slots: Vec<String> = branch.iter()
+        .map(|slot| hex::encode(slot.storage_key))
+        .collect();
 
-    // For each mined address, generate SSTORE operations
-    // Each SSTORE needs:
-    // 1. PUSH32 <value> (1 wei)
-    // 2. PUSH32 <storage_key>
-    // 3. SSTORE
+    let template = ContractTemplate {
+        storage_slots: storage_slots.clone(),
+    };
 
-    for slot in branch {
-        // PUSH1 0x01 (value = 1 wei)
-        bytecode.push(0x60); // PUSH1
-        bytecode.push(0x01); // value: 1
-
-        // PUSH32 <storage_key>
-        bytecode.push(0x7f); // PUSH32
-        bytecode.extend_from_slice(&slot.storage_key);
-
-        // SSTORE
-        bytecode.push(0x55); // SSTORE opcode
-    }
-
-    // After all SSTOREs, deploy minimal ERC20 runtime code
-    // For simplicity, we'll deploy a minimal contract that just stores the data
-
-    // Simple runtime code that just has a fallback function
-    let runtime_code = vec![
-        0x00, // STOP (minimal runtime - just stores the data)
-    ];
-
-    // Calculate runtime code size
-    let runtime_size = runtime_code.len();
-
-    // CODECOPY the runtime code to memory
-    // PUSH1 <runtime_size>
-    bytecode.push(0x60);
-    bytecode.push(runtime_size as u8);
-
-    // PUSH1 0x00 (memory destination)
-    bytecode.push(0x60);
-    bytecode.push(0x00);
-
-    // Calculate position of runtime code in bytecode
-    let runtime_offset = bytecode.len() + 4; // +4 for CODECOPY and RETURN opcodes
-
-    // PUSH2 <runtime_offset>
-    if runtime_offset < 256 {
-        bytecode.push(0x60); // PUSH1
-        bytecode.push(runtime_offset as u8);
-    } else {
-        bytecode.push(0x61); // PUSH2
-        bytecode.push((runtime_offset >> 8) as u8);
-        bytecode.push((runtime_offset & 0xFF) as u8);
-    }
-
-    // CODECOPY
-    bytecode.push(0x39);
-
-    // RETURN the runtime code
-    // PUSH1 <runtime_size>
-    bytecode.push(0x60);
-    bytecode.push(runtime_size as u8);
-
-    // PUSH1 0x00 (memory offset)
-    bytecode.push(0x60);
-    bytecode.push(0x00);
-
-    // RETURN
-    bytecode.push(0xf3);
-
-    // Append the runtime code
-    bytecode.extend_from_slice(&runtime_code);
-
-    // Output the initcode
-    info!("Generated initcode ({} bytes):", bytecode.len());
-    info!("");
-
-    // Output as hex string
-    let hex_string = hex::encode(&bytecode);
-
-    // Break into chunks for readability (with log formatting)
-    for (i, chunk) in hex_string.as_bytes().chunks(64).enumerate() {
-        if i == 0 {
-            info!("0x{}", std::str::from_utf8(chunk).unwrap());
-        } else {
-            info!("  {}", std::str::from_utf8(chunk).unwrap());
+    let contract_source = match template.render() {
+        Ok(source) => source,
+        Err(e) => {
+            error!("Failed to render contract template: {}", e);
+            return;
         }
+    };
+
+    // Ensure contracts directory exists
+    if let Err(e) = fs::create_dir_all("contracts") {
+        error!("Failed to create contracts directory: {}", e);
+        return;
     }
 
-    // Also output the complete initcode in a copy-friendly format
-    info!("");
-    info!("═══ Complete Initcode (copy-friendly) ═══");
-    println!("0x{}", hex_string);
-
-    info!("");
-    info!("═══ Initcode Breakdown ═══");
-    info!("SSTOREs: {} operations ({} bytes)", branch.len(), branch.len() * 35);
-    info!("Deployment overhead: {} bytes", bytecode.len() - (branch.len() * 35));
-    info!("Total initcode size: {} bytes", bytecode.len());
-
-    // Calculate deployment gas estimate
-    let gas_estimate = estimate_deployment_gas(branch.len(), bytecode.len());
-    info!("Estimated deployment gas: ~{}", format_number(gas_estimate));
-
-    info!("");
-    info!("═══ Storage Slots Written ═══");
-    for (i, slot) in branch.iter().enumerate() {
-        info!("Slot {}: 0x{}", i + 1, hex::encode(&slot.storage_key));
+    // Save the generated contract
+    let contract_path = "contracts/WorstCaseERC20.sol";
+    if let Err(e) = fs::write(&contract_path, &contract_source) {
+        error!("Failed to write contract: {}", e);
+        return;
     }
-
-    // Return the bytecode
-    bytecode
-}
-
-/// Estimate gas cost for deploying the contract
-fn estimate_deployment_gas(num_sstores: usize, bytecode_size: usize) -> u64 {
-    let base_creation = 32000; // Base contract creation cost
-    let per_byte = 200; // Gas per byte of initcode (approximate)
-    let sstore_cost = 20000; // Cold SSTORE cost (first write to slot)
-
-    base_creation + (bytecode_size as u64 * per_byte) + (num_sstores as u64 * sstore_cost)
+    info!("Generated contract saved to: {}", contract_path);
 }
