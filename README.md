@@ -122,21 +122,6 @@ Generate a Solidity contract with mined storage slots:
 }
 ```
 
-## Performance Metrics
-
-### On Apple M4 Pro (CPU only)
-
-#### Storage Mining
-- **Hash rate**: ~68.5 million hashes/second
-- **Depth 5**: Instant
-- **Depth 8**: ~4 seconds
-- **Depth 9**: ~1 minute
-- **Depth 10**: ~15 minutes
-
-#### CREATE2 Account Mining
-- **1,000 contracts at depth 5**: ~20 seconds
-- **15,000 contracts at depth 8**: ~2-3 hours
-- **Mining rate**: ~50 contracts/second at depth 5
 
 ## Technical Details
 
@@ -151,43 +136,6 @@ By creating addresses/slots with shared prefixes, we force:
 - Deep extension nodes before branch nodes
 - Maximum trie traversal depth
 - Highest computational cost per gas unit
-
-## Attack Scenario
-
-See [WORST_CASE_ATTACK_GUIDE.md](WORST_CASE_ATTACK_GUIDE.md) for a comprehensive guide on using the mined data to create worst-case Ethereum blocks.
-
-## Deployment Example
-
-Deploy mined contracts to a local Ethereum node:
-
-```bash
-# Start Anvil
-anvil
-
-# Deploy using generated initcode
-cast send --rpc-url http://localhost:8545 \
-  --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
-  --create "0x[INITCODE_HEX]"
-
-# Verify storage was written
-cast storage --rpc-url http://localhost:8545 [CONTRACT_ADDRESS] [STORAGE_SLOT]
-```
-
-## Project Structure
-
-```
-worst_case_miner/
-├── src/
-│   ├── main.rs              # CLI entry point
-│   ├── account_miner.rs     # CREATE2 and auxiliary account mining
-│   ├── storage_miner.rs     # Storage slot mining
-│   └── cuda_miner.rs        # Optional CUDA acceleration
-├── templates/
-│   └── WorstCaseERC20.sol.j2  # Contract template
-├── contracts/
-│   └── WorstCaseERC20.sol     # Generated contract
-└── build.rs                    # CUDA build configuration
-```
 
 ## License
 
