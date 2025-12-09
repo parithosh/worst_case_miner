@@ -1,6 +1,6 @@
 # Worst Case Ethereum Miner
 
-A high-performance tool for mining Ethereum addresses and storage slots that create worst-case scenarios in Ethereum's Modified Patricia Trie (MPT) structures. This tool can mine both storage slots for deep storage tries and CREATE2 addresses with auxiliary accounts for deep account tries.
+A high-performance tool for mining Ethereum addresses and storage slots that create worst-case scenarios in Ethereum's Merkle Patricia Trie (MPT) structures. This tool can mine both storage slots for deep storage tries and CREATE2 addresses with auxiliary accounts for deep account tries.
 
 ![diagram.png](diagram.png)
 
@@ -50,32 +50,38 @@ Mine storage slots to create a storage branch of specified depth:
 
 Mine CREATE2 addresses with auxiliary accounts for account trie depth:
 
+#### Important: Deployer Address Requirements
+
+**The `--deployer` must be a contract address, not an EOA**, since only contracts can use CREATE2. We recommend using **Nick's deterministic deployer** at `0x4e59b44847b379578588920ca78fbf26c0b4956c`, which is already deployed on Ethereum mainnet and most testnets.
+
 ```bash
-# Mine with a Solidity file (auto-compiles)
-./target/release/worst_case_miner create2 \
+# Recommended: Use Nick's deterministic deployer (already deployed on mainnet/testnets)
+./target/release/worst_case_miner \
     --depth 5 \
     --num-contracts 1000 \
-    --deployer 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 \
+    --deployer 0x4e59b44847b379578588920ca78fbf26c0b4956c \
     --init-code WorstCaseERC20.sol \
     --accounts-output create2_1000_depth5.json
 
 # Mine with pre-compiled bytecode
-./target/release/worst_case_miner create2 \
+./target/release/worst_case_miner \
     --depth 5 \
     --num-contracts 1000 \
-    --deployer 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 \
+    --deployer 0x4e59b44847b379578588920ca78fbf26c0b4956c \
     --init-code bytecode.hex \
     --accounts-output create2_1000_depth5.json
 
 # Auto-generate contract and mine (no init-code needed)
-./target/release/worst_case_miner create2 \
+./target/release/worst_case_miner \
     --depth 5 \
     --num-contracts 1000 \
-    --deployer 0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266 \
+    --deployer 0x4e59b44847b379578588920ca78fbf26c0b4956c \
     --accounts-output create2_1000_depth5.json
 ```
 
 The tool automatically compiles Solidity files with `--metadata-hash none` to ensure consistent bytecode generation.
+
+**Note**: If you use a custom deployer contract instead of Nick's method, you must first deploy that contract and use its address. The mined addresses depend on the deployer address, so changing it will result in different CREATE2 addresses.
 
 ### Contract Generation from Template
 
