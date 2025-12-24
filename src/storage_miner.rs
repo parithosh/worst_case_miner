@@ -25,7 +25,7 @@ use crate::cuda_miner;
 #[derive(Template)]
 #[template(path = "WorstCaseERC20.sol.j2")]
 pub struct ContractTemplate {
-    storage_slots: Vec<String>,
+    addresses: Vec<String>,
 }
 
 /// Standard ERC20 balance mapping storage slot
@@ -372,13 +372,13 @@ pub fn generate_contract(branch: &[StorageSlot]) {
     info!("");
 
     // Step 1: Generate the contract using Askama template
-    let storage_slots: Vec<String> = branch
+    let addresses: Vec<String> = branch
         .iter()
-        .map(|slot| hex::encode(slot.storage_key))
+        .map(|slot| hex::encode(slot.address))
         .collect();
 
     let template = ContractTemplate {
-        storage_slots: storage_slots.clone(),
+        addresses: addresses.clone(),
     };
 
     let contract_source = match template.render() {
